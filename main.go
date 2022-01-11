@@ -52,38 +52,31 @@ func main() {
 
 	log.Println("Connecting to server...")
 
-	// Connect to server
 	c, err := client.DialTLS(imapServer, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Connected")
 
-	// Don't forget to logout
 	defer c.Logout()
 
-	// Login
 	if err := c.Login(*username, *password); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Logged in")
 
-	// Select a mailbox
 	mbox, err := c.Select("INBOX", false)
 	if err != nil {
-		//if _, err := c.Select("Sent", false); err != nil {
 		log.Fatal(err)
 	}
 
-	waitForMsg := func(c *client.Client) []client.Update {
+	waitForUpdates := func(c *client.Client) []client.Update {
 
-		fmt.Println("wait for msg")
+		fmt.Println("waitForUpdates")
 
-		// Create a channel to receive mailbox updates
 		updates := make(chan client.Update, 1)
 		c.Updates = updates
 
-		// Start idling
 		stopped := false
 		stop := make(chan struct{})
 		done := make(chan error, 1)
@@ -93,7 +86,6 @@ func main() {
 
 		var out []client.Update
 
-		// Listen for updates
 		for {
 			select {
 			case update := <-updates:
@@ -124,14 +116,8 @@ func main() {
 
 	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) {
 
-		//from := (mbox.Messages - mbox.Recent) + 1
-		//to := mbox.Messages
-
-		//fmt.Printf("From %d to %d\n", from, to)
-
 		seqset := new(imap.SeqSet)
-		seqset.AddRange(lastUid, 0)
-		//items := []imap.FetchItem{imap.FetchEnvelope}
+		seqset.AddRange(lastUid+1, 0)
 
 		section := &imap.BodySectionName{}
 		items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, section.FetchItem()}
@@ -142,7 +128,6 @@ func main() {
 			done <- c.UidFetch(seqset, items, messages)
 		}()
 
-		//log.Printf("Last %d messages:", mbox.Recent)
 		var newLastUid uint32
 		for msg := range messages {
 			//log.Println("* " + msg.Envelope.Subject)
@@ -153,9 +138,6 @@ func main() {
 			}
 
 			newLastUid = msg.Uid
-
-			//fmt.Println("body")
-			//fmt.Println(body)
 
 			verifications, err := dkim.Verify(body)
 			if err != nil {
@@ -190,21 +172,14 @@ func main() {
 		switch u := update.(type) {
 		case *client.MailboxUpdate:
 			fmt.Println("MailboxUpdate")
-			printJson(u)
-
 			mbox := u.Mailbox
-
 			getMessages(c, mbox)
-
 		case *client.MessageUpdate:
 			fmt.Println("MessageUpdate")
-			printJson(u)
 		case *client.StatusUpdate:
 			fmt.Println("StatusUpdate")
-			printJson(u)
 		case *client.ExpungeUpdate:
 			fmt.Println("ExpungeUpdate")
-			fmt.Println(u)
 		default:
 			fmt.Println("Unknown update type")
 		}
@@ -213,7 +188,7 @@ func main() {
 	getMessages(c, mbox)
 
 	for {
-		updates := waitForMsg(c)
+		updates := waitForUpdates(c)
 
 		for _, u := range updates {
 			processUpdate(c, u)
