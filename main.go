@@ -26,7 +26,7 @@ func main() {
 	provider := flag.String("provider", "", providerStr)
 	username := flag.String("username", "", "IMAP Username")
 	password := flag.String("password", "", "IMAP password")
-	lastUidArg := flag.Int("last-uid", 0, "Last UID")
+	//lastUidArg := flag.Int("last-uid", 0, "Last UID")
 	flag.Parse()
 
 	if *username == "" {
@@ -46,6 +46,9 @@ func main() {
 	default:
 		log.Fatal("Invalid provider")
 	}
+
+	db := NewDatabase()
+	defer db.Close()
 
 	log.Println("Connecting to server...")
 
@@ -110,9 +113,12 @@ func main() {
 		}
 	}
 
-	var lastUid uint32 = uint32(*lastUidArg)
+	lastUid, err := db.GetLastUid()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) uint32 {
+	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) {
 
 		//from := (mbox.Messages - mbox.Recent) + 1
 		//to := mbox.Messages
@@ -133,7 +139,7 @@ func main() {
 		}()
 
 		//log.Printf("Last %d messages:", mbox.Recent)
-		var lastUid uint32
+		var newLastUid uint32
 		for msg := range messages {
 			//log.Println("* " + msg.Envelope.Subject)
 			fmt.Println("Message")
@@ -142,7 +148,7 @@ func main() {
 				log.Fatal("Server didn't returned message body")
 			}
 
-			lastUid = msg.Uid
+			newLastUid = msg.Uid
 
 			//fmt.Println("body")
 			//fmt.Println(body)
@@ -165,8 +171,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		fmt.Println("lastUid", lastUid)
-		return lastUid
+		lastUid = newLastUid
+		err = db.SetLastUid(newLastUid)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	processUpdate := func(c *client.Client, update client.Update) {
@@ -177,7 +186,7 @@ func main() {
 
 			mbox := u.Mailbox
 
-			lastUid = getMessages(c, mbox)
+			getMessages(c, mbox)
 
 		case *client.MessageUpdate:
 			fmt.Println("MessageUpdate")
@@ -193,7 +202,7 @@ func main() {
 		}
 	}
 
-	lastUid = getMessages(c, mbox)
+	getMessages(c, mbox)
 
 	for {
 		updates := waitForMsg(c)
