@@ -26,7 +26,7 @@ func main() {
 	provider := flag.String("provider", "", providerStr)
 	username := flag.String("username", "", "IMAP Username")
 	password := flag.String("password", "", "IMAP password")
-	//lastUidArg := flag.Int("last-uid", 0, "Last UID")
+	lastUidArg := flag.Int("last-uid", 0, "Last UID")
 	flag.Parse()
 
 	if *username == "" {
@@ -118,6 +118,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if *lastUidArg != 0 {
+		lastUid = uint32(*lastUidArg)
+	}
+
 	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) {
 
 		//from := (mbox.Messages - mbox.Recent) + 1
@@ -130,7 +134,7 @@ func main() {
 		//items := []imap.FetchItem{imap.FetchEnvelope}
 
 		section := &imap.BodySectionName{}
-		items := []imap.FetchItem{imap.FetchUid, section.FetchItem()}
+		items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, section.FetchItem()}
 
 		messages := make(chan *imap.Message, 10)
 		done := make(chan error, 1)
@@ -142,7 +146,7 @@ func main() {
 		var newLastUid uint32
 		for msg := range messages {
 			//log.Println("* " + msg.Envelope.Subject)
-			fmt.Println("Message")
+			fmt.Println("Message", msg.Uid, msg.Envelope.Subject)
 			body := msg.GetBody(section)
 			if body == nil {
 				log.Fatal("Server didn't returned message body")
@@ -156,6 +160,10 @@ func main() {
 			verifications, err := dkim.Verify(body)
 			if err != nil {
 				log.Fatal(err)
+			}
+
+			if len(verifications) == 0 {
+				log.Println("WARNING: No DKIM found")
 			}
 
 			for _, v := range verifications {
