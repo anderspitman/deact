@@ -26,6 +26,16 @@ func NewDatabase() *Database {
 		return nil
 	}
 
+	sqlStmt = `
+	CREATE TABLE IF NOT EXISTS
+        deactions(id INTEGER NOT NULL PRIMARY KEY, actor TEXT, action TEXT, target TEXT, content TEXT, email TEXT);
+	`
+	_, err = db.Exec(sqlStmt)
+	if err != nil {
+		log.Printf("%q: %s\n", err, sqlStmt)
+		return nil
+	}
+
 	return &Database{
 		db: db,
 	}
@@ -58,6 +68,17 @@ func (d *Database) SetLastUid(uid uint32) error {
 		log.Fatal(err)
 	}
 
+	return nil
+}
+
+func (d *Database) InsertFollow(obj *DeactObject, emailText string) error {
+	stmt := `
+        INSERT INTO deactions(actor, action, target, content, email) VALUES(?, ?, ?, ?, ?)
+        `
+	_, err := d.db.Exec(stmt, obj.Actor, obj.Action, obj.Target, obj.Content, emailText)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -1,15 +1,29 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/mail"
+	"strconv"
+	"strings"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-msgauth/dkim"
 )
+
+type DeactObject struct {
+	DeactVersion int    `json:"deact_version"`
+	Actor        string `json:"actor"`
+	Action       string `json:"action"`
+	Target       string `json:"target"`
+	Content      string `json:"content"`
+}
 
 func providers() []string {
 	return []string{"fastmail", "gmail"}
@@ -130,6 +144,8 @@ func main() {
 
 		var newLastUid uint32
 		for msg := range messages {
+			newLastUid = msg.Uid
+
 			//log.Println("* " + msg.Envelope.Subject)
 			fmt.Println("Message", msg.Uid, msg.Envelope.Subject)
 			body := msg.GetBody(section)
@@ -137,10 +153,26 @@ func main() {
 				log.Fatal("Server didn't returned message body")
 			}
 
-			newLastUid = msg.Uid
-
-			verifications, err := dkim.Verify(body)
+			bodyBytes, err := io.ReadAll(body)
 			if err != nil {
+				log.Fatal(err)
+			}
+
+			parsedBody, err := mail.ReadMessage(bytes.NewReader(bodyBytes))
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			subject := parsedBody.Header.Get("Subject")
+
+			if !strings.HasPrefix(subject, "deact-version:1") {
+				fmt.Println("skipping")
+				continue
+			}
+
+			verifications, err := dkim.Verify(bytes.NewReader(bodyBytes))
+			if err != nil {
+				fmt.Println("here3")
 				log.Fatal(err)
 			}
 
@@ -148,9 +180,42 @@ func main() {
 				log.Println("WARNING: No DKIM found")
 			}
 
+			//printJson(parsedBody.Header)
+			//fmt.Println(string(bodyBytes))
+
 			for _, v := range verifications {
 				if v.Err == nil {
 					log.Println("Valid signature for:", v.Domain)
+					//for _, header := range v.HeaderKeys {
+					//        value := parsedBody.Header.Get(header)
+					//        fmt.Printf("%s: %s\n", header, value)
+					//}
+
+					deactObj, err := parseDeactText(subject)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					address, err := mail.ParseAddress(parsedBody.Header.Get("From"))
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					deactObj.Actor = address.Address
+
+					err = db.InsertFollow(deactObj, string(bodyBytes))
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					switch deactObj.Action {
+					case "follow":
+
+					default:
+						log.Fatal(errors.New("Invalid deact action " + deactObj.Action))
+					}
+
+					printJson(deactObj)
 				} else {
 					log.Println("Invalid signature for:", v.Domain, v.Err)
 				}
@@ -194,6 +259,39 @@ func main() {
 			processUpdate(c, u)
 		}
 	}
+}
+
+func parseDeactText(text string) (*DeactObject, error) {
+	parts := strings.Split(text, ",")
+
+	obj := &DeactObject{}
+
+	for _, part := range parts {
+		attrParts := strings.Split(part, ":")
+		key := strings.TrimSpace(attrParts[0])
+		value := strings.TrimSpace(attrParts[1])
+
+		switch key {
+		case "deact-version":
+			var err error
+			obj.DeactVersion, err = strconv.Atoi(value)
+			if err != nil {
+				return nil, err
+			}
+		//case "actor":
+		//        obj.Actor = value
+		case "action":
+			obj.Action = value
+		case "target":
+			obj.Target = value
+		//case "content":
+		//        obj.Content = value
+		default:
+			return nil, errors.New("Invalid deact key: " + key)
+		}
+	}
+
+	return obj, nil
 }
 
 func printJson(data interface{}) {
