@@ -72,7 +72,7 @@ func (d *Database) SetLastUid(uid uint32) error {
 	return nil
 }
 
-func (d *Database) InsertFollow(obj *DeactObject, emailText string) error {
+func (d *Database) InsertEntry(obj *DeactObject, emailText string) error {
 	stmt := `
         INSERT INTO deactions(public, actor, action, target, content, email) VALUES(?, ?, ?, ?, ?, ?)
         `

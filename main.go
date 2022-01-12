@@ -228,14 +228,14 @@ func main() {
 
 					deactObj.Actor = address.Address
 
-					err = db.InsertFollow(deactObj, string(bodyBytes))
+					err = db.InsertEntry(deactObj, string(bodyBytes))
 					if err != nil {
 						log.Fatal(err)
 					}
 
 					switch deactObj.Action {
+					case "upvote":
 					case "follow":
-
 					default:
 						log.Fatal(errors.New("Invalid deact action " + deactObj.Action))
 					}
