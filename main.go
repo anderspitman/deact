@@ -284,6 +284,11 @@ func parseDeactText(text string) (*DeactObject, error) {
 
 	for _, part := range parts {
 		attrParts := strings.Split(part, ":")
+
+		if len(attrParts) != 2 {
+			return nil, errors.New("Invalid attribute: " + part)
+		}
+
 		key := strings.TrimSpace(attrParts[0])
 		value := strings.TrimSpace(attrParts[1])
 
