@@ -12,6 +12,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -53,6 +54,8 @@ func main() {
 	username := flag.String("username", "", "IMAP Username")
 	password := flag.String("password", "", "IMAP password")
 	lastUidArg := flag.Int("last-uid", 0, "Last UID")
+	deactFolderName := flag.String("deact-folder-name", "deact", "Deact folder name on server")
+	pollingInterval := flag.Int("polling-interval", 4, "Polling interval in seconds")
 	flag.Parse()
 
 	if *username == "" {
@@ -103,41 +106,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	waitForUpdates := func(c *client.Client) []client.Update {
-
-		fmt.Println("waitForUpdates")
-
-		updates := make(chan client.Update, 1)
-		c.Updates = updates
-
-		stopped := false
-		stop := make(chan struct{})
-		done := make(chan error, 1)
-		go func() {
-			done <- c.Idle(stop, nil)
-		}()
-
-		var out []client.Update
-
-		for {
-			select {
-			case update := <-updates:
-				log.Println("New update:", update)
-				if !stopped {
-					close(stop)
-					stopped = true
-					out = append(out, update)
-				}
-			case err := <-done:
-				if err != nil {
-					log.Fatal(err)
-				}
-				log.Println("Not idling anymore")
-				return out
-			}
-		}
-	}
-
 	var lastUid uint32
 
 	if *lastUidArg != 0 {
@@ -153,13 +121,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) {
+	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) []uint32 {
+
+		var moveList []uint32
 
 		seqset := new(imap.SeqSet)
 		seqset.AddRange(lastUid+1, 0)
 
 		section := &imap.BodySectionName{}
-		items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, section.FetchItem()}
+		items := []imap.FetchItem{imap.FetchUid, section.FetchItem()}
 
 		messages := make(chan *imap.Message, 10)
 		done := make(chan error, 1)
@@ -171,34 +141,36 @@ func main() {
 		for msg := range messages {
 			newLastUid = msg.Uid
 
-			//log.Println("* " + msg.Envelope.Subject)
-			fmt.Println("Message", msg.Uid, msg.Envelope.Subject)
+			fmt.Println("Message", msg.Uid)
 			body := msg.GetBody(section)
 			if body == nil {
-				log.Fatal("Server didn't returned message body")
+				log.Println("WARNING: Server didn't returned message body")
+				continue
 			}
 
 			bodyBytes, err := io.ReadAll(body)
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
+				continue
 			}
 
 			parsedBody, err := mail.ReadMessage(bytes.NewReader(bodyBytes))
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
+				continue
 			}
 
 			subject := parsedBody.Header.Get("Subject")
 
 			if !strings.HasPrefix(subject, "deact-version:1") {
-				fmt.Println("skipping")
+				log.Println("Invalid deact-version. Skipping")
 				continue
 			}
 
 			verifications, err := dkim.Verify(bytes.NewReader(bodyBytes))
 			if err != nil {
-				fmt.Println("here3")
-				log.Fatal(err)
+				log.Println(err)
+				continue
 			}
 
 			if len(verifications) == 0 {
@@ -216,12 +188,20 @@ func main() {
 					//        fmt.Printf("%s: %s\n", header, value)
 					//}
 
-					deactObj, err := parseDeactText(subject)
+					address, err := mail.ParseAddress(parsedBody.Header.Get("From"))
 					if err != nil {
 						log.Fatal(err)
 					}
 
-					address, err := mail.ParseAddress(parsedBody.Header.Get("From"))
+					addrParts := strings.Split(address.Address, "@")
+					domain := addrParts[1]
+
+					if domain != v.Domain {
+						log.Println("Domain doesn't match sender. Skipping")
+						continue
+					}
+
+					deactObj, err := parseDeactText(subject)
 					if err != nil {
 						log.Fatal(err)
 					}
@@ -241,6 +221,9 @@ func main() {
 					}
 
 					printJson(deactObj)
+
+					moveList = append(moveList, msg.Uid)
+
 				} else {
 					log.Println("Invalid signature for:", v.Domain, v.Err)
 				}
@@ -256,33 +239,35 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	}
 
-	processUpdate := func(c *client.Client, update client.Update) {
-		switch u := update.(type) {
-		case *client.MailboxUpdate:
-			fmt.Println("MailboxUpdate")
-			mbox := u.Mailbox
-			getMessages(c, mbox)
-		case *client.MessageUpdate:
-			fmt.Println("MessageUpdate")
-		case *client.StatusUpdate:
-			fmt.Println("StatusUpdate")
-		case *client.ExpungeUpdate:
-			fmt.Println("ExpungeUpdate")
-		default:
-			fmt.Println("Unknown update type")
-		}
+		return moveList
 	}
-
-	getMessages(c, mbox)
 
 	for {
-		updates := waitForUpdates(c)
+		fmt.Println("Polling for messages")
 
-		for _, u := range updates {
-			processUpdate(c, u)
+		moveList := getMessages(c, mbox)
+		fmt.Println(moveList)
+
+		if *deactFolderName != "INBOX" {
+			moveAll(c, moveList, *deactFolderName)
 		}
+
+		time.Sleep(time.Duration(*pollingInterval) * time.Second)
+	}
+}
+
+func moveAll(c *client.Client, moveList []uint32, deactFolderName string) {
+	for _, uid := range moveList {
+		seqset := new(imap.SeqSet)
+		seqset.AddNum(uid)
+
+		fmt.Println(deactFolderName)
+		err := c.UidMove(seqset, deactFolderName)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("after UidMove")
 	}
 }
 
