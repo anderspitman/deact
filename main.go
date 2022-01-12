@@ -190,7 +190,8 @@ func main() {
 
 					address, err := mail.ParseAddress(parsedBody.Header.Get("From"))
 					if err != nil {
-						log.Fatal(err)
+						log.Println(err)
+						continue
 					}
 
 					addrParts := strings.Split(address.Address, "@")
@@ -203,21 +204,24 @@ func main() {
 
 					deactObj, err := parseDeactText(subject)
 					if err != nil {
-						log.Fatal(err)
+						log.Println(err)
+						continue
 					}
 
 					deactObj.Actor = address.Address
 
 					err = db.InsertEntry(deactObj, string(bodyBytes))
 					if err != nil {
-						log.Fatal(err)
+						log.Println(err)
+						continue
 					}
 
 					switch deactObj.Action {
 					case "upvote":
 					case "follow":
 					default:
-						log.Fatal(errors.New("Invalid deact action " + deactObj.Action))
+						log.Println("Invalid deact action " + deactObj.Action)
+						continue
 					}
 
 					printJson(deactObj)
@@ -231,13 +235,15 @@ func main() {
 		}
 
 		if err := <-done; err != nil {
-			log.Fatal(err)
+			log.Println(err)
+			return moveList
 		}
 
 		lastUid = newLastUid
 		err = db.SetLastUid(newLastUid)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
+			return moveList
 		}
 
 		return moveList
@@ -265,9 +271,9 @@ func moveAll(c *client.Client, moveList []uint32, deactFolderName string) {
 		fmt.Println(deactFolderName)
 		err := c.UidMove(seqset, deactFolderName)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
+			continue
 		}
-		fmt.Println("after UidMove")
 	}
 }
 
