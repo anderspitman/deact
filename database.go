@@ -28,7 +28,7 @@ func NewDatabase() *Database {
 
 	sqlStmt = `
 	CREATE TABLE IF NOT EXISTS
-        deactions(id INTEGER NOT NULL PRIMARY KEY, actor TEXT, action TEXT, target TEXT, content TEXT, email TEXT);
+        deactions(id INTEGER NOT NULL PRIMARY KEY, public INTEGER, actor TEXT, action TEXT, target TEXT, content TEXT, email TEXT);
 	`
 	_, err = db.Exec(sqlStmt)
 	if err != nil {
@@ -73,9 +73,9 @@ func (d *Database) SetLastUid(uid uint32) error {
 
 func (d *Database) InsertFollow(obj *DeactObject, emailText string) error {
 	stmt := `
-        INSERT INTO deactions(actor, action, target, content, email) VALUES(?, ?, ?, ?, ?)
+        INSERT INTO deactions(public, actor, action, target, content, email) VALUES(?, ?, ?, ?, ?, ?)
         `
-	_, err := d.db.Exec(stmt, obj.Actor, obj.Action, obj.Target, obj.Content, emailText)
+	_, err := d.db.Exec(stmt, obj.Public, obj.Actor, obj.Action, obj.Target, obj.Content, emailText)
 	if err != nil {
 		return err
 	}

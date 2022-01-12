@@ -19,6 +19,7 @@ import (
 
 type DeactObject struct {
 	DeactVersion int    `json:"deact_version"`
+	Public       bool   `json:"public"`
 	Actor        string `json:"actor"`
 	Action       string `json:"action"`
 	Target       string `json:"target"`
@@ -119,13 +120,19 @@ func main() {
 		}
 	}
 
-	lastUid, err := db.GetLastUid()
-	if err != nil {
-		log.Fatal(err)
-	}
+	var lastUid uint32
 
 	if *lastUidArg != 0 {
 		lastUid = uint32(*lastUidArg)
+		err = db.SetLastUid(lastUid)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	lastUid, err = db.GetLastUid()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	getMessages := func(c *client.Client, mbox *imap.MailboxStatus) {
@@ -277,6 +284,12 @@ func parseDeactText(text string) (*DeactObject, error) {
 			obj.DeactVersion, err = strconv.Atoi(value)
 			if err != nil {
 				return nil, err
+			}
+		case "public":
+			if value == "true" {
+				obj.Public = true
+			} else {
+				obj.Public = false
 			}
 		//case "actor":
 		//        obj.Actor = value
