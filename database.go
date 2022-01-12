@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
 )
@@ -80,6 +81,87 @@ func (d *Database) InsertFollow(obj *DeactObject, emailText string) error {
 		return err
 	}
 	return nil
+}
+
+func (d *Database) GetEntries(query EntriesQuery) ([]*DeactObject, error) {
+
+	selectStr := "public,actor,action,target"
+	// Return all entries by default
+	whereStr := "1=1"
+
+	if query.Public != nil {
+		whereStr += fmt.Sprintf(" AND public=%t", *query.Public)
+	}
+	if query.Actor != nil {
+		whereStr += fmt.Sprintf(" AND actor='%s'", *query.Actor)
+	}
+	if query.Action != nil {
+		whereStr += fmt.Sprintf(" AND action='%s'", *query.Action)
+	}
+	if query.Target != nil {
+		whereStr += fmt.Sprintf(" AND target='%s'", *query.Target)
+	}
+	if query.Content {
+		selectStr += ",content"
+	}
+	if query.Email {
+		selectStr += ",email"
+	}
+
+	stmt := fmt.Sprintf("SELECT %s from deactions WHERE %s;", selectStr, whereStr)
+
+	log.Println(stmt)
+
+	rows, err := d.db.Query(stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var objects []*DeactObject
+
+	for rows.Next() {
+
+		obj := &DeactObject{}
+
+		// TODO: This feels super messy
+		if query.Content && query.Email {
+			if err := rows.Scan(&obj.Public, &obj.Actor, &obj.Action, &obj.Target, &obj.Content, &obj.Email); err != nil {
+				return nil, err
+			}
+		} else if query.Content {
+			if err := rows.Scan(&obj.Public, &obj.Actor, &obj.Action, &obj.Target, &obj.Content); err != nil {
+				return nil, err
+			}
+		} else if query.Email {
+			if err := rows.Scan(&obj.Public, &obj.Actor, &obj.Action, &obj.Target, &obj.Email); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := rows.Scan(&obj.Public, &obj.Actor, &obj.Action, &obj.Target); err != nil {
+				return nil, err
+			}
+		}
+
+		objects = append(objects, obj)
+	}
+
+	// If the database is being written to ensure to check for Close
+	// errors that may be returned from the driver. The query may
+	// encounter an auto-commit error and be forced to rollback changes.
+	rerr := rows.Close()
+	if rerr != nil {
+		return nil, err
+	}
+
+	// Rows.Err will report the last error encountered by Rows.Scan.
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	//fmt.Printf("%s are %d years old", strings.Join(names, ", "), age)
+
+	return objects, nil
 }
 
 func (d *Database) Close() {

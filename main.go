@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/mail"
 	"strconv"
 	"strings"
@@ -18,12 +19,22 @@ import (
 )
 
 type DeactObject struct {
-	DeactVersion int    `json:"deact_version"`
-	Public       bool   `json:"public"`
-	Actor        string `json:"actor"`
-	Action       string `json:"action"`
-	Target       string `json:"target"`
-	Content      string `json:"content"`
+	DeactVersion int    `json:"deact_version,omitempty"`
+	Public       bool   `json:"public,omitempty"`
+	Actor        string `json:"actor,omitempty"`
+	Action       string `json:"action,omitempty"`
+	Target       string `json:"target,omitempty"`
+	Content      string `json:"content,omitempty"`
+	Email        string `json:"email,omitempty"`
+}
+
+type EntriesQuery struct {
+	Public  *bool
+	Actor   *string
+	Action  *string
+	Target  *string
+	Content bool
+	Email   bool
 }
 
 func providers() []string {
@@ -64,6 +75,13 @@ func main() {
 
 	db := NewDatabase()
 	defer db.Close()
+
+	apiServer := NewApiServer(db)
+
+	http.Handle("/api/", http.StripPrefix("/api", apiServer))
+	go func() {
+		http.ListenAndServe(":9004", nil)
+	}()
 
 	log.Println("Connecting to server...")
 
